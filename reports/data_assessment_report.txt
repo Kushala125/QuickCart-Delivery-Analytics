@@ -1,0 +1,135 @@
+============================================================
+QUICKCART DATA ASSESSMENT REPORT
+============================================================
+
+DATASET SHAPE
+----------------------------------------
+Rows    : 150000
+Columns : 21
+
+COLUMN NAMES
+----------------------------------------
+Order_ID
+Customer_Age
+Customer_Type
+Restaurant_Type
+Cuisine_Type
+Delivery_Distance_KM
+Delivery_Time_Min
+Order_Value_USD
+Item_Count
+Weather_Condition
+Traffic_Level
+Customer_Rating
+Complaint_Flag
+Refund_Flag
+Revenue_USD
+Profit_USD
+City
+Month
+Quarter
+Demand_Score
+Churn_Risk
+
+DATA TYPES
+----------------------------------------
+Order_ID                    str
+Customer_Age              int64
+Customer_Type               str
+Restaurant_Type             str
+Cuisine_Type                str
+Delivery_Distance_KM    float64
+Delivery_Time_Min         int64
+Order_Value_USD         float64
+Item_Count                int64
+Weather_Condition           str
+Traffic_Level               str
+Customer_Rating         float64
+Complaint_Flag            int64
+Refund_Flag               int64
+Revenue_USD             float64
+Profit_USD              float64
+City                        str
+Month                     int64
+Quarter                   int64
+Demand_Score            float64
+Churn_Risk              float64
+
+MISSING VALUES
+----------------------------------------
+Order_ID                0
+Customer_Age            0
+Customer_Type           0
+Restaurant_Type         0
+Cuisine_Type            0
+Delivery_Distance_KM    0
+Delivery_Time_Min       0
+Order_Value_USD         0
+Item_Count              0
+Weather_Condition       0
+Traffic_Level           0
+Customer_Rating         0
+Complaint_Flag          0
+Refund_Flag             0
+Revenue_USD             0
+Profit_USD              0
+City                    0
+Month                   0
+Quarter                 0
+Demand_Score            0
+Churn_Risk              0
+
+DUPLICATE ROWS
+----------------------------------------
+0
+
+SUMMARY STATISTICS
+----------------------------------------
+        Customer_Age  Delivery_Distance_KM  Delivery_Time_Min  Order_Value_USD     Item_Count  Customer_Rating  Complaint_Flag    Refund_Flag    Revenue_USD     Profit_USD          Month        Quarter   Demand_Score     Churn_Risk
+count  150000.000000         150000.000000      150000.000000    150000.000000  150000.000000    150000.000000   150000.000000  150000.000000  150000.000000  150000.000000  150000.000000  150000.000000  150000.000000  150000.000000
+mean       46.047953             12.761809          64.528240       152.888794       7.508100         2.999477        0.100693       0.048720     252.287419      90.032737       6.510427       2.503947      50.057309      49.926011
+std        16.457810              7.082171          31.742264        85.088266       4.031177         1.156920        0.300923       0.215283     142.917771      63.488361       3.441716       1.115290      28.899435      28.921656
+min        18.000000              0.500000          10.000000         5.000000       1.000000         1.000000        0.000000       0.000000       5.000000     -20.000000       1.000000       1.000000       0.000000       0.000000
+25%        32.000000              6.630000          37.000000        79.240000       4.000000         2.000000        0.000000       0.000000     128.430000      35.060000       4.000000       2.000000      24.960000      24.880000
+50%        46.000000             12.760000          65.000000       153.125000       8.000000         3.000000        0.000000       0.000000     251.910000      90.060000       7.000000       3.000000      50.060000      49.830000
+75%        60.000000             18.910000          92.000000       226.690000      11.000000         4.000000        0.000000       0.000000     375.962500     145.160000       9.000000       3.000000      75.170000      75.000000
+max        74.000000             25.000000         119.000000       300.000000      14.000000         5.000000        1.000000       1.000000     500.000000     200.000000      12.000000       4.000000     100.000000     100.000000
+
+CUSTOMER TYPES
+----------------------------------------
+Customer_Type
+New          50185
+Returning    49912
+Premium      49903
+
+RESTAURANT TYPES
+----------------------------------------
+Restaurant_Type
+Cafe             37743
+Fast Food        37528
+Cloud Kitchen    37387
+Restaurant       37342
+
+CITY DISTRIBUTION
+----------------------------------------
+City
+Singapore    30236
+New York     30108
+London       29939
+Mumbai       29923
+Sydney       29794
+
+WEATHER CONDITIONS
+----------------------------------------
+Weather_Condition
+Sunny     37610
+Cloudy    37497
+Stormy    37447
+Rainy     37446
+
+TRAFFIC LEVELS
+----------------------------------------
+Traffic_Level
+Low       50105
+Medium    49997
+High      49898
