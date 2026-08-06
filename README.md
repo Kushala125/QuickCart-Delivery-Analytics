@@ -27,15 +27,16 @@
 5. [AWS Infrastructure](#-aws-infrastructure)
 6. [ETL Pipeline](#-etl-pipeline)
 7. [ETL Logger](#-etl-logger)
-8. [Executive KPI Summary](#-executive-kpi-summary)
-9. [Visual Analytics](#-visual-analytics)
-   - [Revenue Analysis](#-revenue-analysis)
-   - [Delivery Performance](#-delivery-performance)
-   - [Customer Behaviour](#-customer-behaviour)
-   - [Risk & Correlation Analysis](#-risk--correlation-analysis)
-10. [Key Insights](#-key-insights)
-11. [Getting Started](#-getting-started)
-12. [License](#-license)
+8. [SQL Analysis](#-sql-analysis)
+9. [Executive KPI Summary](#-executive-kpi-summary)
+10. [Visual Analytics](#-visual-analytics)
+    - [Revenue Analysis](#-revenue-analysis)
+    - [Delivery Performance](#-delivery-performance)
+    - [Customer Behaviour](#-customer-behaviour)
+    - [Risk & Correlation Analysis](#-risk--correlation-analysis)
+11. [Key Insights](#-key-insights)
+12. [Getting Started](#-getting-started)
+13. [License](#-license)
 
 ---
 
@@ -234,6 +235,655 @@ Every pipeline run is logged end-to-end by `logger.py`, which configures a singl
 5. **Completion** — logs total pipeline execution time (24.6 seconds) and a closing banner, giving a simple performance benchmark for every run.
 
 > 🔐 The real `etl.log` includes the RDS host address on the "Connecting to MySQL RDS" line — that's been removed here since a database endpoint is infrastructure detail that shouldn't be published in a public README.
+
+---
+
+## 🗄 SQL Analysis
+
+Once the data lands in `delivery_data` on MySQL RDS, `sql/QuickCart_SQL_Analysis.sql` runs **25 business questions** directly against the warehouse — everything from top-line revenue to churn-risk quartiles — using progressively more advanced SQL: aggregates, `CASE` bucketing, CTEs, and window functions (`RANK`, `ROW_NUMBER`, `LAG`, `NTILE`).
+
+### Table Schema
+
+```sql
+CREATE TABLE delivery_data (
+    Order_ID              VARCHAR(20)   PRIMARY KEY,
+    Customer_Age          TINYINT UNSIGNED,
+    Customer_Type         VARCHAR(20),
+    Restaurant_Type       VARCHAR(20),
+    Cuisine_Type          VARCHAR(20),
+    Delivery_Distance_KM  DECIMAL(6,2),
+    Delivery_Time_Min     SMALLINT UNSIGNED,
+    Order_Value_USD       DECIMAL(8,2),
+    Item_Count             TINYINT UNSIGNED,
+    Weather_Condition     VARCHAR(20),
+    Traffic_Level          VARCHAR(10),
+    Customer_Rating        DECIMAL(3,1),
+    Complaint_Flag         TINYINT(1),
+    Refund_Flag             TINYINT(1),
+    Revenue_USD             DECIMAL(8,2),
+    Profit_USD               DECIMAL(8,2),
+    City                      VARCHAR(20),
+    Month                      TINYINT UNSIGNED,
+    Quarter                   TINYINT UNSIGNED,
+    Demand_Score               DECIMAL(5,2),
+    Churn_Risk                  DECIMAL(5,2),
+    INDEX idx_city (City),
+    INDEX idx_cuisine (Cuisine_Type),
+    INDEX idx_restaurant_type (Restaurant_Type),
+    INDEX idx_month (Month)
+);
+```
+
+Loaded with `LOAD DATA LOCAL INFILE` from the same `del.csv` extracted by the ETL pipeline — confirmed with `SELECT COUNT(*)` returning exactly **150,000** rows.
+
+### The 25 Business Questions
+
+Every query below was run against the full dataset; results and a one-line explanation are included with each. Click a question to expand it.
+
+<details>
+<summary><b>Q1. What is the overall business performance in terms of revenue, profit, and average order value?</b></summary>
+
+```sql
+SELECT
+    COUNT(*) AS Total_Delivery_Data,
+    ROUND(SUM(Revenue_USD),2) AS Total_Revenue,
+    ROUND(SUM(Profit_USD),2) AS Total_Profit,
+    ROUND(AVG(Order_Value_USD),2) AS Avg_Order_Value,
+    ROUND(SUM(Profit_USD)/SUM(Revenue_USD)*100,2) AS Profit_Margin_Pct
+FROM delivery_data;
+```
+
+| Total Orders | Total Revenue | Total Profit | Avg Order Value | Profit Margin % |
+|---:|---:|---:|---:|---:|
+| 150,000 | $37,843,112.84 | $13,504,910.56 | $152.89 | 35.69% |
+
+**Explanation:** The business runs a healthy ~35.7% profit margin on revenue across 150,000 orders, with an average order value of ~$153.
+</details>
+
+<details>
+<summary><b>Q2. Which cities generate the most revenue and profit?</b></summary>
+
+```sql
+SELECT City, COUNT(*) AS Delivery_Data,
+       ROUND(SUM(Revenue_USD),2) AS Total_Revenue,
+       ROUND(SUM(Profit_USD),2) AS Total_Profit
+FROM delivery_data
+GROUP BY City
+ORDER BY Total_Revenue DESC;
+```
+
+| City | Orders | Total Revenue | Total Profit |
+|---|---:|---:|---:|
+| Singapore | 30,236 | $7,632,153.44 | $2,735,593.54 |
+| London | 29,939 | $7,588,105.17 | $2,695,977.33 |
+| New York | 30,108 | $7,587,788.92 | $2,711,426.13 |
+| Mumbai | 29,923 | $7,563,571.09 | $2,680,502.10 |
+| Sydney | 29,794 | $7,471,494.22 | $2,681,411.46 |
+
+**Explanation:** Revenue is remarkably evenly spread across all 5 cities (within ~2% of each other) — order volume is balanced, not concentrated in one market.
+</details>
+
+<details>
+<summary><b>Q3. Which cuisine types drive the highest average order value and revenue?</b></summary>
+
+```sql
+SELECT Cuisine_Type, COUNT(*) AS Delivery_Data,
+       ROUND(AVG(Order_Value_USD),2) AS Avg_Order_Value,
+       ROUND(SUM(Revenue_USD),2) AS Total_Revenue
+FROM delivery_data
+GROUP BY Cuisine_Type
+ORDER BY Total_Revenue DESC;
+```
+
+| Cuisine | Orders | Avg Order Value | Total Revenue |
+|---|---:|---:|---:|
+| Indian | 37,635 | $152.95 | $9,512,377.10 |
+| Mexican | 37,420 | $152.81 | $9,444,313.95 |
+| Chinese | 37,403 | $153.05 | $9,443,342.57 |
+| Italian | 37,542 | $152.75 | $9,443,079.22 |
+
+**Explanation:** Cuisine mix is essentially uniform — no single cuisine dominates the platform.
+</details>
+
+<details>
+<summary><b>Q4. Which restaurant type is most profitable?</b></summary>
+
+```sql
+SELECT Restaurant_Type, COUNT(*) AS Delivery_Data,
+       ROUND(SUM(Profit_USD),2) AS Total_Profit,
+       ROUND(AVG(Profit_USD),2) AS Avg_Profit_Per_Order
+FROM delivery_data
+GROUP BY Restaurant_Type
+ORDER BY Total_Profit DESC;
+```
+
+| Restaurant Type | Orders | Total Profit | Avg Profit/Order |
+|---|---:|---:|---:|
+| Cafe | 37,743 | $3,393,147.78 | $89.90 |
+| Fast Food | 37,528 | $3,387,006.02 | $90.25 |
+| Restaurant | 37,342 | $3,362,672.10 | $90.05 |
+| Cloud Kitchen | 37,387 | $3,362,084.66 | $89.93 |
+
+**Explanation:** All four restaurant formats perform almost identically on profit per order — format alone isn't a profit lever in this data.
+</details>
+
+<details>
+<summary><b>Q5. How does revenue trend across the 12 months?</b></summary>
+
+```sql
+SELECT Month, COUNT(*) AS Delivery_Data, ROUND(SUM(Revenue_USD),2) AS Total_Revenue
+FROM delivery_data
+GROUP BY Month
+ORDER BY Month;
+```
+
+| Month | Orders | Revenue |
+|---:|---:|---:|
+| 1 | 12,695 | $3,185,693.65 |
+| 2 | 11,617 | $2,940,248.09 |
+| 3 | 12,827 | $3,227,482.16 |
+| 4 | 12,295 | $3,105,546.55 |
+| 5 | 12,872 | $3,237,190.26 |
+| 6 | 12,365 | $3,117,157.08 |
+| 7 | 12,761 | $3,215,965.77 |
+| 8 | 12,798 | $3,235,179.82 |
+| 9 | 12,368 | $3,122,749.79 |
+| 10 | 12,527 | $3,143,781.09 |
+| 11 | 12,369 | $3,139,674.95 |
+| 12 | 12,506 | $3,172,443.63 |
+
+**Explanation:** Revenue is stable year-round (~$2.9M–$3.2M/month); February is the low point, likely because it has fewer days.
+</details>
+
+<details>
+<summary><b>Q6. How do quarters compare in orders, revenue, and average customer rating?</b></summary>
+
+```sql
+SELECT Quarter, COUNT(*) AS Delivery_Data,
+       ROUND(SUM(Revenue_USD),2) AS Total_Revenue,
+       ROUND(AVG(Customer_Rating),2) AS Avg_Rating
+FROM delivery_data
+GROUP BY Quarter
+ORDER BY Quarter;
+```
+
+| Quarter | Orders | Revenue | Avg Rating |
+|---:|---:|---:|---:|
+| 1 | 37,139 | $9,353,423.90 | 3.00 |
+| 2 | 37,532 | $9,459,893.89 | 3.00 |
+| 3 | 37,927 | $9,573,895.38 | 2.99 |
+| 4 | 37,402 | $9,455,899.67 | 3.00 |
+
+**Explanation:** Customer satisfaction (avg rating ~3.0/5) is flat across quarters — no seasonal service quality swings.
+</details>
+
+<details>
+<summary><b>Q7. How do New, Returning, and Premium customers differ in spend and churn risk?</b></summary>
+
+```sql
+SELECT Customer_Type, COUNT(*) AS Delivery_Data,
+       ROUND(AVG(Order_Value_USD),2) AS Avg_Order_Value,
+       ROUND(AVG(Churn_Risk),2) AS Avg_Churn_Risk,
+       ROUND(AVG(Customer_Rating),2) AS Avg_Rating
+FROM delivery_data
+GROUP BY Customer_Type
+ORDER BY Avg_Order_Value DESC;
+```
+
+| Customer Type | Orders | Avg Order Value | Avg Churn Risk | Avg Rating |
+|---|---:|---:|---:|---:|
+| Premium | 49,903 | $153.22 | 49.82 | 3.00 |
+| Returning | 49,912 | $153.08 | 50.00 | 3.01 |
+| New | 50,185 | $152.37 | 49.95 | 3.00 |
+
+**Explanation:** Premium customers spend only marginally more than New/Returning — the "Premium" tier isn't translating into materially higher basket size.
+</details>
+
+<details>
+<summary><b>Q8. Does traffic congestion correlate with higher complaint rates?</b></summary>
+
+```sql
+SELECT Traffic_Level, COUNT(*) AS Delivery_Data,
+       SUM(Complaint_Flag) AS Complaints,
+       ROUND(SUM(Complaint_Flag)*100.0/COUNT(*),2) AS Complaint_Rate_Pct,
+       ROUND(AVG(Delivery_Time_Min),2) AS Avg_Delivery_Time
+FROM delivery_data
+GROUP BY Traffic_Level
+ORDER BY Complaint_Rate_Pct DESC;
+```
+
+| Traffic Level | Orders | Complaints | Complaint Rate % | Avg Delivery Time |
+|---|---:|---:|---:|---:|
+| Low | 50,105 | 5,079 | 10.14% | 64.54 min |
+| High | 49,898 | 5,047 | 10.11% | 64.55 min |
+| Medium | 49,997 | 4,978 | 9.96% | 64.49 min |
+
+**Explanation:** Contrary to intuition, traffic level shows no meaningful effect on complaint rate or delivery time — congestion isn't the driver of service issues in this dataset.
+</details>
+
+<details>
+<summary><b>Q9. How does weather condition impact average delivery time and demand?</b></summary>
+
+```sql
+SELECT Weather_Condition, COUNT(*) AS Delivery_Data,
+       ROUND(AVG(Delivery_Time_Min),2) AS Avg_Delivery_Time,
+       ROUND(AVG(Demand_Score),2) AS Avg_Demand_Score
+FROM delivery_data
+GROUP BY Weather_Condition
+ORDER BY Avg_Delivery_Time DESC;
+```
+
+| Weather | Orders | Avg Delivery Time | Avg Demand Score |
+|---|---:|---:|---:|
+| Stormy | 37,447 | 64.60 min | 50.03 |
+| Rainy | 37,446 | 64.54 min | 50.17 |
+| Cloudy | 37,497 | 64.52 min | 49.98 |
+| Sunny | 37,610 | 64.45 min | 50.06 |
+
+**Explanation:** Weather has negligible impact on delivery time in this data — delivery time is likely generated independently of weather.
+</details>
+
+<details>
+<summary><b>Q10. Which cities have the most customers at high risk of churn (Churn_Risk &gt; 80)?</b></summary>
+
+```sql
+SELECT City, COUNT(*) AS High_Risk_Customers,
+       ROUND(AVG(Customer_Rating),2) AS Avg_Rating
+FROM delivery_data
+WHERE Churn_Risk > 80
+GROUP BY City
+ORDER BY High_Risk_Customers DESC;
+```
+
+| City | High-Risk Customers | Avg Rating |
+|---|---:|---:|
+| Mumbai | 6,085 | 3.00 |
+| Singapore | 6,074 | 3.02 |
+| New York | 6,069 | 2.98 |
+| London | 6,034 | 3.00 |
+| Sydney | 5,909 | 2.99 |
+
+**Explanation:** About 20% of orders in every city carry high churn risk (>80) — this is a uniform retention challenge, not a city-specific one.
+</details>
+
+<details>
+<summary><b>Q11. Do refunded orders tend to also have complaints, and what's the profit impact?</b></summary>
+
+```sql
+SELECT Refund_Flag, COUNT(*) AS Delivery_Data,
+       SUM(Complaint_Flag) AS Complaints_In_Group,
+       ROUND(AVG(Profit_USD),2) AS Avg_Profit,
+       ROUND(SUM(Profit_USD),2) AS Total_Profit
+FROM delivery_data
+GROUP BY Refund_Flag;
+```
+
+| Refunded? | Orders | Complaints in Group | Avg Profit | Total Profit |
+|---|---:|---:|---:|---:|
+| No | 142,692 | 14,405 | $90.05 | $12,848,971.89 |
+| Yes | 7,308 | 699 | $89.76 | $655,938.67 |
+
+**Explanation:** ~4.9% of orders are refunded; refunded orders still generate near-identical average profit, suggesting refunds are handled as partial/goodwill credits rather than a full profit loss.
+</details>
+
+<details>
+<summary><b>Q12. What are the single highest-value orders in the dataset?</b></summary>
+
+```sql
+SELECT Order_ID, City, Cuisine_Type, Order_Value_USD, Revenue_USD, Profit_USD
+FROM delivery_data
+ORDER BY Revenue_USD DESC
+LIMIT 10;
+```
+
+| Order ID | City | Cuisine | Order Value | Revenue | Profit |
+|---|---|---|---:|---:|---:|
+| ORD0063686 | Mumbai | Mexican | $109.41 | $500.00 | $170.86 |
+| ORD0094686 | Singapore | Chinese | $52.66 | $500.00 | $178.72 |
+| ORD0006516 | New York | Mexican | $245.45 | $499.99 | $105.22 |
+| ORD0060038 | Singapore | Indian | $110.09 | $499.99 | $154.13 |
+| ORD0112804 | London | Indian | $43.65 | $499.99 | $7.02 |
+
+**Explanation:** Revenue appears capped near $500 — worth flagging as a possible data-generation ceiling rather than a real-world cap.
+</details>
+
+<details>
+<summary><b>Q13. Rank cities by total profit with a window function, showing each city's share of total profit</b></summary>
+
+```sql
+WITH city_profit AS (
+    SELECT City, ROUND(SUM(Profit_USD),2) AS Total_Profit
+    FROM delivery_data
+    GROUP BY City
+)
+SELECT City, Total_Profit,
+       RANK() OVER (ORDER BY Total_Profit DESC) AS Profit_Rank,
+       ROUND(100.0 * Total_Profit / SUM(Total_Profit) OVER (), 2) AS Pct_Of_Total_Profit
+FROM city_profit
+ORDER BY Profit_Rank;
+```
+
+| City | Total Profit | Rank | % of Total Profit |
+|---|---:|---:|---:|
+| Singapore | $2,735,593.54 | 1 | 20.26% |
+| New York | $2,711,426.13 | 2 | 20.08% |
+| London | $2,695,977.33 | 3 | 19.96% |
+| Sydney | $2,681,411.46 | 4 | 19.86% |
+| Mumbai | $2,680,502.10 | 5 | 19.85% |
+
+**Explanation:** Singapore edges out as the #1 city by profit, but the spread across all 5 is under half a percentage point.
+</details>
+
+<details>
+<summary><b>Q14. How many orders per cuisine exceed that cuisine's own average order value?</b></summary>
+
+```sql
+WITH cuisine_avg AS (
+    SELECT Cuisine_Type, AVG(Order_Value_USD) AS Avg_Value
+    FROM delivery_data
+    GROUP BY Cuisine_Type
+)
+SELECT o.Cuisine_Type, COUNT(*) AS Delivery_Data_Above_Avg
+FROM delivery_data o
+JOIN cuisine_avg c ON o.Cuisine_Type = c.Cuisine_Type
+WHERE o.Order_Value_USD > c.Avg_Value
+GROUP BY o.Cuisine_Type
+ORDER BY Delivery_Data_Above_Avg DESC;
+```
+
+| Cuisine | Orders Above Cuisine Average |
+|---|---:|
+| Indian | 18,876 |
+| Chinese | 18,770 |
+| Italian | 18,763 |
+| Mexican | 18,705 |
+
+**Explanation:** Roughly half of every cuisine's orders sit above its own average — consistent with a fairly symmetric order-value distribution. Written as a CTE joined once per group rather than a correlated subquery re-executed per row — the standard optimization for this pattern at 150K-row scale.
+</details>
+
+<details>
+<summary><b>Q15. How are orders distributed across low/medium/high value buckets, and what's each bucket's profit contribution?</b></summary>
+
+```sql
+SELECT
+    CASE
+        WHEN Order_Value_USD < 100 THEN 'Low (<$100)'
+        WHEN Order_Value_USD BETWEEN 100 AND 300 THEN 'Medium ($100-$300)'
+        ELSE 'High (>$300)'
+    END AS Value_Bucket,
+    COUNT(*) AS Delivery_Data,
+    ROUND(SUM(Revenue_USD),2) AS Total_Revenue,
+    ROUND(SUM(Profit_USD),2) AS Total_Profit
+FROM delivery_data
+GROUP BY Value_Bucket
+ORDER BY Total_Revenue DESC;
+```
+
+| Value Bucket | Orders | Total Revenue | Total Profit |
+|---|---:|---:|---:|
+| Medium ($100–$300) | 101,953 | $25,720,244.46 | $9,170,193.04 |
+| Low (<$100) | 48,047 | $12,122,868.38 | $4,334,717.52 |
+
+**Explanation:** No orders fall in the "High (>$300)" bucket — the mid-tier ($100–$300) basket is the core of the business, driving ~68% of revenue.
+</details>
+
+<details>
+<summary><b>Q16. For each city, which cuisine type generates the most revenue?</b></summary>
+
+```sql
+WITH ranked AS (
+    SELECT City, Cuisine_Type, SUM(Revenue_USD) AS Cuisine_Revenue,
+           ROW_NUMBER() OVER (PARTITION BY City ORDER BY SUM(Revenue_USD) DESC) AS rn
+    FROM delivery_data
+    GROUP BY City, Cuisine_Type
+)
+SELECT City, Cuisine_Type, ROUND(Cuisine_Revenue,2) AS Cuisine_Revenue
+FROM ranked
+WHERE rn = 1
+ORDER BY Cuisine_Revenue DESC;
+```
+
+| City | Top Cuisine | Revenue |
+|---|---|---:|
+| Singapore | Indian | $1,938,917.85 |
+| Mumbai | Indian | $1,928,308.05 |
+| London | Italian | $1,925,235.27 |
+| New York | Chinese | $1,909,726.04 |
+| Sydney | Chinese | $1,887,207.59 |
+
+**Explanation:** Cuisine preference does vary meaningfully by city — Indian food leads in Singapore/Mumbai, Italian in London, Chinese in New York/Sydney. Useful for city-specific menu and marketing decisions.
+</details>
+
+<details>
+<summary><b>Q17. How does customer rating change as delivery time increases?</b></summary>
+
+```sql
+SELECT
+    CASE
+        WHEN Delivery_Time_Min <= 30 THEN '0-30 min'
+        WHEN Delivery_Time_Min <= 60 THEN '31-60 min'
+        WHEN Delivery_Time_Min <= 90 THEN '61-90 min'
+        ELSE '90+ min'
+    END AS Delivery_Time_Bucket,
+    COUNT(*) AS Delivery_Data,
+    ROUND(AVG(Customer_Rating),2) AS Avg_Rating,
+    ROUND(SUM(Complaint_Flag)*100.0/COUNT(*),2) AS Complaint_Rate_Pct
+FROM delivery_data
+GROUP BY Delivery_Time_Bucket
+ORDER BY MIN(Delivery_Time_Min);
+```
+
+| Delivery Time | Orders | Avg Rating | Complaint Rate % |
+|---|---:|---:|---:|
+| 0–30 min | 28,590 | 3.01 | 10.25% |
+| 31–60 min | 40,849 | 3.00 | 9.84% |
+| 61–90 min | 41,119 | 3.00 | 10.21% |
+| 90+ min | 39,442 | 3.00 | 10.03% |
+
+**Explanation:** Ratings and complaint rates barely move with delivery time — customer satisfaction here isn't primarily driven by speed.
+</details>
+
+<details>
+<summary><b>Q18. What is the month-over-month revenue growth rate?</b></summary>
+
+```sql
+WITH monthly AS (
+    SELECT Month, SUM(Revenue_USD) AS Revenue
+    FROM delivery_data
+    GROUP BY Month
+)
+SELECT Month, ROUND(Revenue,2) AS Revenue,
+       ROUND(Revenue - LAG(Revenue) OVER (ORDER BY Month),2) AS Change_vs_Prev_Month,
+       ROUND((Revenue - LAG(Revenue) OVER (ORDER BY Month)) * 100.0
+             / LAG(Revenue) OVER (ORDER BY Month),2) AS Growth_Pct
+FROM monthly
+ORDER BY Month;
+```
+
+| Month | Revenue | Change vs Prev | Growth % |
+|---:|---:|---:|---:|
+| 1 | $3,185,693.65 | — | — |
+| 2 | $2,940,248.09 | -$245,445.56 | -7.70% |
+| 3 | $3,227,482.16 | +$287,234.07 | +9.77% |
+| 4 | $3,105,546.55 | -$121,935.61 | -3.78% |
+| 5 | $3,237,190.26 | +$131,643.71 | +4.24% |
+| 6 | $3,117,157.08 | -$120,033.18 | -3.71% |
+| 7 | $3,215,965.77 | +$98,808.69 | +3.17% |
+| 8 | $3,235,179.82 | +$19,214.05 | +0.60% |
+| 9 | $3,122,749.79 | -$112,430.03 | -3.48% |
+| 10 | $3,143,781.09 | +$21,031.30 | +0.67% |
+| 11 | $3,139,674.95 | -$4,106.14 | -0.13% |
+| 12 | $3,172,443.63 | +$32,768.68 | +1.04% |
+
+**Explanation:** Revenue oscillates in a tight ±10% band month to month with no sustained growth or decline trend — a mature, stable-demand business.
+</details>
+
+<details>
+<summary><b>Q19. Which cities have an average order value higher than the platform-wide average?</b></summary>
+
+```sql
+SELECT City, ROUND(AVG(Order_Value_USD),2) AS City_Avg_Order_Value
+FROM delivery_data
+GROUP BY City
+HAVING AVG(Order_Value_USD) > (SELECT AVG(Order_Value_USD) FROM delivery_data)
+ORDER BY City_Avg_Order_Value DESC;
+```
+
+| City | Avg Order Value |
+|---|---:|
+| Mumbai | $153.40 |
+| Singapore | $153.33 |
+| New York | $152.99 |
+
+**Explanation:** Only 3 of the 5 cities beat the global average order value — London and Sydney sit just below it, though the gap is small (~$1–2).
+</details>
+
+<details>
+<summary><b>Q20. Which restaurant type has the highest complaint rate?</b></summary>
+
+```sql
+SELECT Restaurant_Type, COUNT(*) AS Delivery_Data,
+       SUM(Complaint_Flag) AS Complaints,
+       ROUND(SUM(Complaint_Flag)*100.0/COUNT(*),2) AS Complaint_Rate_Pct
+FROM delivery_data
+GROUP BY Restaurant_Type
+ORDER BY Complaint_Rate_Pct DESC;
+```
+
+| Restaurant Type | Orders | Complaints | Complaint Rate % |
+|---|---:|---:|---:|
+| Restaurant | 37,342 | 3,816 | 10.22% |
+| Cafe | 37,743 | 3,784 | 10.03% |
+| Fast Food | 37,528 | 3,761 | 10.02% |
+| Cloud Kitchen | 37,387 | 3,743 | 10.01% |
+
+**Explanation:** Complaint rates are essentially flat (~10%) across all restaurant formats — no format stands out as a quality problem area.
+</details>
+
+<details>
+<summary><b>Q21. How do delivery distance and delivery time compare across cities?</b></summary>
+
+```sql
+SELECT City, ROUND(AVG(Delivery_Distance_KM),2) AS Avg_Distance_KM,
+       ROUND(AVG(Delivery_Time_Min),2) AS Avg_Delivery_Time_Min
+FROM delivery_data
+GROUP BY City
+ORDER BY Avg_Distance_KM DESC;
+```
+
+| City | Avg Distance (km) | Avg Delivery Time (min) |
+|---|---:|---:|
+| Mumbai | 12.81 | 64.70 |
+| New York | 12.76 | 64.48 |
+| London | 12.75 | 64.58 |
+| Singapore | 12.75 | 64.26 |
+| Sydney | 12.73 | 64.63 |
+
+**Explanation:** Delivery distance and time are nearly identical across all 5 cities (~12.7–12.8 km, ~64–65 min) — logistics performance is consistent globally, not a differentiator between markets.
+</details>
+
+<details>
+<summary><b>Q22. Does ordering more items increase the average order value?</b></summary>
+
+```sql
+SELECT
+    CASE
+        WHEN Item_Count <= 5 THEN '1-5 items'
+        WHEN Item_Count <= 10 THEN '6-10 items'
+        ELSE '11-14 items'
+    END AS Item_Count_Bucket,
+    COUNT(*) AS Delivery_Data,
+    ROUND(AVG(Order_Value_USD),2) AS Avg_Order_Value
+FROM delivery_data
+GROUP BY Item_Count_Bucket
+ORDER BY MIN(Item_Count);
+```
+
+| Item Count | Orders | Avg Order Value |
+|---|---:|---:|
+| 1–5 items | 53,487 | $152.68 |
+| 6–10 items | 53,639 | $153.25 |
+| 11–14 items | 42,874 | $152.69 |
+
+**Explanation:** No relationship between item count and order value — orders with 1–5 items cost about the same on average as orders with 11–14 items, meaning per-item price effectively scales down as basket size grows.
+</details>
+
+<details>
+<summary><b>Q23. How does customer rating differ across churn-risk quartiles?</b></summary>
+
+```sql
+WITH quartiles AS (
+    SELECT Customer_Rating, Churn_Risk,
+           NTILE(4) OVER (ORDER BY Churn_Risk) AS Churn_Quartile
+    FROM delivery_data
+)
+SELECT Churn_Quartile, COUNT(*) AS Delivery_Data,
+       ROUND(MIN(Churn_Risk),2) AS Min_Churn_Risk,
+       ROUND(MAX(Churn_Risk),2) AS Max_Churn_Risk,
+       ROUND(AVG(Customer_Rating),2) AS Avg_Rating
+FROM quartiles
+GROUP BY Churn_Quartile
+ORDER BY Churn_Quartile;
+```
+
+| Quartile | Orders | Min Churn Risk | Max Churn Risk | Avg Rating |
+|---|---:|---:|---:|---:|
+| 1 (lowest risk) | 37,500 | 0.00 | 24.88 | 3.00 |
+| 2 | 37,500 | 24.88 | 49.83 | 3.00 |
+| 3 | 37,500 | 49.83 | 75.00 | 2.99 |
+| 4 (highest risk) | 37,500 | 75.00 | 100.00 | 3.00 |
+
+**Explanation:** Customer rating is flat across churn-risk quartiles — high-risk customers aren't rating their experience any lower than low-risk ones, suggesting churn risk here is driven by factors other than satisfaction (e.g. price sensitivity, competition).
+</details>
+
+<details>
+<summary><b>Q24. Which cuisine types have the most loss-making orders (negative profit)?</b></summary>
+
+```sql
+SELECT Cuisine_Type, COUNT(*) AS Loss_Making_Delivery_Data
+FROM delivery_data
+WHERE Profit_USD < 0
+GROUP BY Cuisine_Type
+ORDER BY Loss_Making_Delivery_Data DESC;
+```
+
+| Cuisine | Loss-Making Orders |
+|---|---:|
+| Italian | 3,440 |
+| Indian | 3,393 |
+| Chinese | 3,357 |
+| Mexican | 3,356 |
+
+**Explanation:** ~9% of all orders (13,546 of 150,000) are loss-making, spread almost evenly across cuisines — this isn't a cuisine-specific cost problem, it's a platform-wide pattern worth investigating (e.g. discounting, delivery cost outliers).
+</details>
+
+<details>
+<summary><b>Q25. Which cities have a profit margin higher than the company-wide average?</b></summary>
+
+```sql
+SELECT City, ROUND(SUM(Profit_USD)*100.0/SUM(Revenue_USD),2) AS City_Profit_Margin_Pct
+FROM delivery_data
+GROUP BY City
+HAVING SUM(Profit_USD)*100.0/SUM(Revenue_USD) > (
+    SELECT SUM(Profit_USD)*100.0/SUM(Revenue_USD) FROM delivery_data
+)
+ORDER BY City_Profit_Margin_Pct DESC;
+```
+
+| City | Profit Margin % |
+|---|---:|
+| Sydney | 35.89% |
+| Singapore | 35.84% |
+| New York | 35.73% |
+
+**Explanation:** Sydney, Singapore, and New York run above the company-wide 35.69% margin, while London and Mumbai sit slightly below — a useful lens for margin-improvement initiatives even though the differences are small.
+</details>
+
+### SQL Techniques Showcased
+
+`Aggregates (SUM/AVG/COUNT/ROUND)` · `GROUP BY / ORDER BY` · `HAVING with scalar subqueries` · `CASE WHEN bucketing` · `CTEs (WITH)` · `Window functions (RANK, ROW_NUMBER + PARTITION BY, LAG, NTILE, SUM OVER)` · `correlated-subquery → JOIN optimization` · `percent-of-total & period-over-period growth calcs` · `quartile segmentation` · `conditional filtering on derived business logic`
+
+> 📄 The full annotated file — all 25 queries with inline results and explanations exactly as run — lives at [`sql/QuickCart_SQL_Analysis.sql`](sql/QuickCart_SQL_Analysis.sql).
 
 ---
 
