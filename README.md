@@ -153,7 +153,8 @@ The pipeline runs on two managed AWS services in the **`ap-south-1` (Mumbai)** r
 **Amazon S3 — Raw Data Lake**
 Incoming order data lands in the `quickcart-food-delivery-kush1250` bucket as a flat CSV (`del.csv`, ~16.3 MB). This is the single source of truth that `extract.py` reads from at the start of every pipeline run.
 
-![S3 Bucket](screenshots/aws_s3_console.png)
+![Uploading s3.png…]()
+
 
 </td>
 <td width="50%">
@@ -161,11 +162,14 @@ Incoming order data lands in the `quickcart-food-delivery-kush1250` bucket as a 
 **Amazon RDS — MySQL Warehouse**
 The transformed data is loaded into `quickcart-db2`, a MySQL instance running on a `db.t4g.micro` node. This is the `delivery_data` table that `load.py` writes into, and the same instance the executive reports and Tableau dashboards query from.
 
-![RDS Database](screenshots/aws_rds_console.png)
+
 
 </td>
 </tr>
 </table>
+
+<img width="1470" height="956" alt="amazon" src="https://github.com/user-attachments/assets/c848440e-78eb-4911-8093-f5aa87f3cde8" />
+
 
 **Why this setup:**
 - **S3** decouples ingestion from processing — new data can be dropped into the bucket at any time without touching the pipeline code.
