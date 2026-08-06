@@ -24,17 +24,18 @@
 2. [Tech Stack](#-tech-stack)
 3. [Repository Structure](#-repository-structure)
 4. [Dataset](#-dataset)
-5. [ETL Pipeline](#-etl-pipeline)
-6. [Executive KPI Summary](#-executive-kpi-summary)
-7. [Visual Analytics](#-visual-analytics)
+5. [AWS Infrastructure](#-aws-infrastructure)
+6. [ETL Pipeline](#-etl-pipeline)
+7. [ETL Logger](#-etl-logger)
+8. [Executive KPI Summary](#-executive-kpi-summary)
+9. [Visual Analytics](#-visual-analytics)
    - [Revenue Analysis](#-revenue-analysis)
    - [Delivery Performance](#-delivery-performance)
    - [Customer Behaviour](#-customer-behaviour)
    - [Risk & Correlation Analysis](#-risk--correlation-analysis)
-8. [Key Insights](#-key-insights)
-9. [Getting Started](#-getting-started)
-10. [Roadmap](#-roadmap)
-11. [License](#-license)
+10. [Key Insights](#-key-insights)
+11. [Getting Started](#-getting-started)
+12. [License](#-license)
 
 ---
 
@@ -140,34 +141,99 @@ The pipeline processes **150,000 order records** across **21 columns**, with **z
 
 ---
 
+## ☁️ AWS Infrastructure
+
+The pipeline runs on two managed AWS services in the **`ap-south-1` (Mumbai)** region: an S3 bucket as the raw data lake, and an RDS MySQL instance as the analytical warehouse.
+
+<table>
+<tr>
+<td width="50%">
+
+**Amazon S3 — Raw Data Lake**
+Incoming order data lands in the `quickcart-food-delivery-kush1250` bucket as a flat CSV (`del.csv`, ~16.3 MB). This is the single source of truth that `extract.py` reads from at the start of every pipeline run.
+
+![S3 Bucket](screenshots/aws_s3_console.png)
+
+</td>
+<td width="50%">
+
+**Amazon RDS — MySQL Warehouse**
+The transformed data is loaded into `quickcart-db2`, a MySQL instance running on a `db.t4g.micro` node. This is the `delivery_data` table that `load.py` writes into, and the same instance the executive reports and Tableau dashboards query from.
+
+![RDS Database](screenshots/aws_rds_console.png)
+
+</td>
+</tr>
+</table>
+
+**Why this setup:**
+- **S3** decouples ingestion from processing — new data can be dropped into the bucket at any time without touching the pipeline code.
+- **RDS (MySQL)** gives the analytics scripts and Tableau a stable, queryable warehouse instead of re-reading a flat file on every run.
+- **`db.t4g.micro`** keeps this a low-cost setup appropriate for a portfolio-scale dataset (150K rows); a production version would size up and add a read replica.
+
+---
+
 ## 🔄 ETL Pipeline
 
-The `python/etl/` package runs a fully logged, three-stage pipeline: **Extract → Transform → Load**.
+The `python/etl/` package runs a fully logged, three-stage pipeline: **Extract → Transform → Load**, orchestrated by `pipeline.py`.
 
 ```
-Extract   →   Pull order data from an S3 bucket using boto3
-Transform →   Clean, type-cast, and reshape with Pandas
-Load      →   Write the final table into a MySQL database on AWS RDS via SQLAlchemy
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│  1. EXTRACT  │ ──▶ │ 2. TRANSFORM │ ──▶ │  3. LOAD    │
+│ extract.py   │     │ transform.py │     │  load.py    │
+└─────────────┘     └──────────────┘     └─────────────┘
+      │                     │                    │
+      ▼                     ▼                    ▼
+  Pull the CSV        Clean, type-cast,     Write the final
+  from the S3          and reshape with      table into
+  bucket via            Pandas               MySQL on RDS
+  boto3                                       via SQLAlchemy
 ```
 
-**Sample run output** (`etl.log`):
+**What each stage does:**
 
-```
-INFO | ========== ETL Pipeline Started ==========
-INFO | Starting data extraction from S3
-INFO | Successfully extracted 150000 rows from S3
-INFO | Starting data transformation
-INFO | Transformation completed. Rows before: 150000, Rows after: 150000
-INFO | Connecting to MySQL RDS
-INFO | Successfully loaded 150000 rows into delivery_data
-INFO | ETL Pipeline completed successfully
-INFO | Pipeline execution time: 24.6 seconds
-INFO | ========== ETL Pipeline Finished ==========
-```
+| Stage | File | Responsibility |
+|---|---|---|
+| **Extract** | `extract.py` | Connects to S3 with `boto3`, locates the source CSV, and reads it into memory. |
+| **Transform** | `transform.py` | Validates row counts, fixes data types, and reshapes columns into the warehouse schema. |
+| **Load** | `load.py` | Opens a `SQLAlchemy` engine against the RDS MySQL endpoint and bulk-writes the cleaned data into the `delivery_data` table. |
+| **Orchestration** | `pipeline.py` | Runs the three stages in sequence, timing the run and stopping on the first failure. |
 
-> ⏱ **Full pipeline runtime: ~24.6 seconds** for 150K rows, extract to load.
+> ⏱ **Full pipeline runtime: ~24.6 seconds** for 150,000 rows, extract to load.
 
 > 🔐 **Security note:** credentials are read from a local AWS credentials file / `.env` and are **never committed to source control**. If you fork this project, populate your own `python/e.env` and AWS credentials locally — don't reuse or share the ones from this repo's history.
+
+---
+
+## 🪵 ETL Logger
+
+Every pipeline run is logged end-to-end by `logger.py`, which configures a single shared Python `logging` instance used by `extract.py`, `transform.py`, and `load.py`. Each stage logs its own start, result, and row counts, so a full run is traceable from one log file without needing to add print statements.
+
+**Actual run log** (`etl.log`, redacted of host/IP for this README):
+
+```
+2026-08-05 18:36:17,246 | INFO | ========== ETL Pipeline Started ==========
+2026-08-05 18:36:17,246 | INFO | Starting data extraction from S3
+2026-08-05 18:36:17,255 | INFO | Found credentials in shared credentials file: ~/.aws/credentials
+2026-08-05 18:36:18,695 | INFO | Successfully extracted 150000 rows from S3
+2026-08-05 18:36:18,696 | INFO | Starting data transformation
+2026-08-05 18:36:18,754 | INFO | Transformation completed. Rows before: 150000, Rows after: 150000
+2026-08-05 18:36:18,754 | INFO | Connecting to MySQL RDS
+2026-08-05 18:36:41,845 | INFO | Successfully loaded 150000 rows into delivery_data
+2026-08-05 18:36:41,846 | INFO | ETL Pipeline completed successfully
+2026-08-05 18:36:41,846 | INFO | Pipeline execution time: 24.6 seconds
+2026-08-05 18:36:41,846 | INFO | ========== ETL Pipeline Finished ==========
+```
+
+**Reading the log, stage by stage:**
+
+1. **Pipeline start** — a clear `====` banner marks the beginning of the run, making individual runs easy to spot when scrolling through history.
+2. **Extraction** — confirms AWS credentials were found locally, then confirms the exact row count pulled from S3 (150,000 rows), so a silent partial read would be immediately visible.
+3. **Transformation** — logs row counts **before and after** cleaning (150,000 → 150,000 here), which is the quickest way to catch accidental row drops during transformation.
+4. **Load** — logs the RDS connection step, then confirms the exact number of rows written into `delivery_data`.
+5. **Completion** — logs total pipeline execution time (24.6 seconds) and a closing banner, giving a simple performance benchmark for every run.
+
+> 🔐 The real `etl.log` includes the RDS host address on the "Connecting to MySQL RDS" line — that's been removed here since a database endpoint is infrastructure detail that shouldn't be published in a public README.
 
 ---
 
@@ -397,16 +463,6 @@ python python/eda.py
 
 ---
 
-## 🗺 Roadmap
-
-- [ ] Add automated tests for the ETL transform layer
-- [ ] Migrate scheduled runs to an orchestrator (Airflow / AWS Step Functions)
-- [ ] Publish the Tableau dashboards as a public workbook
-- [ ] Add a cohort-based churn model beyond the current heuristic Churn_Risk score
-- [ ] Parameterize city/date-range filters for the reporting scripts
-
----
-
 ## 📄 License
 
 This project is licensed under the **MIT License** — free to use, modify, and distribute with attribution.
@@ -418,4 +474,3 @@ This project is licensed under the **MIT License** — free to use, modify, and 
 *Built with 🐼 Pandas, 📊 Seaborn, and ☁️ AWS — by the QuickCart Analytics Team*
 
 </div>
-
