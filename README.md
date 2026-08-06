@@ -433,6 +433,29 @@ Across Customer_Age, Delivery_Distance_KM, Delivery_Time_Min, Order_Value_USD, I
 
 ## 🚀 Getting Started
 
+### Step 1 — Set up the AWS resources
+
+Before running any code, provision the two AWS services the pipeline depends on:
+
+**Create the S3 bucket:**
+1. In the AWS Console, go to **S3 → Create bucket**.
+2. Name it something unique, e.g. `quickcart-food-delivery-<yourname>`, and pick your region (this project uses `ap-south-1` / Mumbai).
+3. Leave default settings (Block Public Access **on**) and click **Create bucket**.
+4. Upload your raw order CSV into the bucket root — `extract.py` reads it from here.
+
+**Create the RDS MySQL instance:**
+1. Go to **RDS → Databases → Create database**.
+2. Choose **MySQL**, then the **Free tier** or a small template like `db.t4g.micro` (what this project uses).
+3. Set a DB identifier (e.g. `quickcart-db`), a master username, and a master password.
+4. Under connectivity, make sure the instance is reachable from where your pipeline runs (public access + a security group inbound rule for MySQL port `3306` if running locally; keep it private if running from within the same VPC).
+5. Once status shows **Available**, copy the endpoint — that's your `RDS_HOST`.
+
+**Grant your pipeline access:**
+- Create an IAM user (or use an existing one) with programmatic access and `AmazonS3ReadOnlyAccess` (or scoped to just this bucket).
+- Run `aws configure` locally to store that IAM user's access key/secret in `~/.aws/credentials` — this is what `extract.py`'s `boto3` client picks up automatically (you'll see `Found credentials in shared credentials file` in `etl.log` when it works).
+
+### Step 2 — Run the pipeline
+
 ```bash
 # 1. Clone the repository
 git clone <repo-url>
@@ -449,12 +472,12 @@ pip install pandas numpy matplotlib seaborn boto3 sqlalchemy pymysql python-dote
 #    Create python/e.env with your own AWS + MySQL credentials — never commit real secrets:
 #    AWS_ACCESS_KEY_ID=...
 #    AWS_SECRET_ACCESS_KEY=...
-#    RDS_HOST=...
+#    RDS_HOST=...          # the endpoint you copied above
 #    RDS_USER=...
 #    RDS_PASSWORD=...
 #    RDS_DB=...
 
-# 5. Run the ETL pipeline
+# 5. Run the ETL pipeline (extract from S3 → transform → load into RDS)
 python python/etl/pipeline.py
 
 # 6. Generate the analytics & charts
