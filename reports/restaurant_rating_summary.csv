@@ -1,0 +1,5 @@
+Restaurant_Type,count,mean,median,min,max
+Cloud Kitchen,37387,3.01,3.0,1.0,5.0
+Cafe,37743,3.0,3.0,1.0,5.0
+Fast Food,37528,3.0,3.0,1.0,5.0
+Restaurant,37342,2.99,3.0,1.0,5.0

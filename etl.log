@@ -1,0 +1,11 @@
+2026-08-05 18:36:17,246 | INFO | ========== ETL Pipeline Started ==========
+2026-08-05 18:36:17,246 | INFO | Starting data extraction from S3
+2026-08-05 18:36:17,255 | INFO | Found credentials in shared credentials file: ~/.aws/credentials
+2026-08-05 18:36:18,695 | INFO | Successfully extracted 150000 rows from S3
+2026-08-05 18:36:18,696 | INFO | Starting data transformation
+2026-08-05 18:36:18,754 | INFO | Transformation completed. Rows before: 150000, Rows after: 150000
+2026-08-05 18:36:18,754 | INFO | Connecting to MySQL RDS (65.2.117.90)
+2026-08-05 18:36:41,845 | INFO | Successfully loaded 150000 rows into delivery_data
+2026-08-05 18:36:41,846 | INFO | ETL Pipeline completed successfully
+2026-08-05 18:36:41,846 | INFO | Pipeline execution time: 24.6 seconds
+2026-08-05 18:36:41,846 | INFO | ========== ETL Pipeline Finished ==========

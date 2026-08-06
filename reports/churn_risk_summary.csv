@@ -1,0 +1,4 @@
+Customer_Type,Total_Customers,High_Risk_Customers,Churn Rate (%)
+Returning,49912,2495820.66,5000.44
+New,50185,2506966.99,4995.45
+Premium,49903,2486113.99,4981.89
